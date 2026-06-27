@@ -1,45 +1,69 @@
-name: CI/CD Pipeline - Backend Ventas
+name: CI/CD Pipeline - Backend Ventas ECS
 
 on:
   push:
     branches:
       - deploy
 
+env:
+  AWS_REGION: us-east-1
+  
+  # ==========================================
+  # VARIABLES ESPECÍFICAS DE BACKEND VENTAS
+  # ==========================================
+  ECR_REPOSITORY: innovatech-backend-ventas    # Nombre de tu repo en ECR
+  ECS_CLUSTER: innovatech-cluster              # El nombre de tu clúster principal en ECS
+  ECS_SERVICE: backend-ventas-service          # El nombre que le diste al servicio en ECS
+  ECS_TASK_FAMILY: task-backend-ventas         # El nombre de la Definición de Tarea en AWS
+  CONTAINER_NAME: backend-ventas               # El nombre del contenedor dentro de la tarea
+
 jobs:
-  build-and-push:
+  deploy:
+    name: Deploy to Amazon ECS
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout del código
-        uses: actions/checkout@v3
+    - name: Checkout del código
+      uses: actions/checkout@v3
 
-      - name: Iniciar sesión en Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+    - name: Configurar credenciales de AWS
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} 
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Construir y Publicar Imagen Docker
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/innovatech-backend-ventas:latest
+    - name: Iniciar sesión en Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
 
-  deploy-to-ec2:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Desplegar en AWS EC2 via SSH
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd innovatech-deploy
-            
-            # Descargamos solo la imagen del backend de ventas actualizada
-            sudo docker compose pull backend-ventas
-            
-            # Levantamos los servicios
-            sudo docker compose up -d
+    - name: Construir, etiquetar y subir imagen a Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: latest
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Descargar la Definición de Tarea actual desde ECS
+      run: |
+        aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_FAMILY }} --query taskDefinition > task-definition.json
+
+    - name: Llenar el nuevo ID de la imagen en la Definición de Tarea
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
+
+    - name: Desplegar en Amazon ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
