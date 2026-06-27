@@ -3,7 +3,7 @@ name: CI/CD Pipeline - Backend Ventas ECS
 on:
   push:
     branches:
-      - deploy
+      - main
 
 env:
   AWS_REGION: us-east-1
