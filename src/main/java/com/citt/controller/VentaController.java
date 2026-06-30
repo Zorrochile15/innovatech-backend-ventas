@@ -26,13 +26,17 @@ public class VentaController {
     @Operation(summary = "Crear una nueva venta", description = "Crea una nueva venta en el sistema")
     @PostMapping
     public ResponseEntity<Venta> crearVenta(@Valid @RequestBody Venta venta){
+        // 1. Guardar primero en la BD para que se genere el ID automáticamente
+        Venta nuevaVenta = ventaService.saveVenta(venta);
+        
+        // 2. Ahora sí usamos el ID generado para armar la respuesta
         URI location = ServletUriComponentsBuilder
                 .fromCurrentRequest()
                 .path("/{idVenta}")
-                .buildAndExpand(venta.getIdVenta())
+                .buildAndExpand(nuevaVenta.getIdVenta())
                 .toUri();
-        ventaService.saveVenta(venta);
-        return ResponseEntity.created(location).body(venta);
+                
+        return ResponseEntity.created(location).body(nuevaVenta);
     }
 
     @PutMapping("/{idVenta}")
@@ -52,15 +56,13 @@ public class VentaController {
     @Operation(summary = "Obtener una venta por ID", description = "Devuelve los detalles de una venta específica")
     public ResponseEntity<Venta> obtenerVenta(@PathVariable Long idVenta) throws VentaNotFoundException {
         Venta venta = ventaService.findById(idVenta);
-        return ResponseEntity.ok(venta); // Retornamos la venta encontrada con un estado 200 (OK)
+        return ResponseEntity.ok(venta);
     }
 
     @DeleteMapping("/{idVenta}")
     @Operation(summary = "Eliminar una venta", description = "Elimina una venta del sistema")
     public ResponseEntity<Void> eliminarVenta(@PathVariable Long idVenta) throws VentaNotFoundException {
         ventaService.deleteVenta(idVenta);
-        return ResponseEntity.noContent().build(); // Respuesta 204 No Content si se elimina correctamente
+        return ResponseEntity.noContent().build();
     }
 }
-
-
